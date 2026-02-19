@@ -1,28 +1,37 @@
 #!/bin/bash
 
 # ================================================================= #
-# SCRIPT DE PROVISIONAMENTO SAMBA AD DC - NÍVEL 2016 + LIXEIRA
-#
-# Compatível com: Ubuntu 22.04 / 24.04 (Noble)
+# SCRIPT DEFINITIVO SAMBA AD DC - NÍVEL 2016 + LIXEIRA
+# Compatibilidade: Ubuntu 22.04 / 24.04 (Noble Numbat)
 # ================================================================= #
 
-# --- VARIÁVEIS (AJUSTE AQUI) ---
+# --- 1. VARIÁVEIS (AJUSTE CONFORME SUA REDE) ---
 DOMAIN="flexclima.local"
 REALM="FLEXCLIMA.LOCAL"
 NETBIOS_NAME="DC01"
 WORKGROUP="FLEXCLIMA"
 ADMIN_PASSWORD="SuaSenhaForteAqui"
 FORWARDER="8.8.8.8"
+INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
 
-# --- 1. LIMPEZA E INSTALAÇÃO ---
-echo "--- Removendo instalações antigas e instalando pacotes ---"
-systemctl stop samba-ad-dc smbd nmbd winbind 2>/dev/null
-apt purge samba* -y && apt autoremove -y
-rm -rf /etc/samba /var/lib/samba /var/cache/samba /run/samba
-apt update && apt install samba krb5-config winbind smbclient ldb-tools -y
+echo "### [1/9] Configurando DNS temporário para instalação ###"
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
 
-# --- 2. PROVISIONAMENTO ---
-echo "--- Provisionando o domínio $REALM ---"
+# --- 2. INSTALAÇÃO DE PACOTES ---
+echo "### [2/9] Instalando Samba e dependências ###"
+apt update
+apt install samba krb5-config krb5-user winbind smbclient ldb-tools net-tools -y
+
+# --- 3. LIMPEZA DE AMBIENTE ---
+echo "### [3/9] Limpando configurações e parando serviços antigos ###"
+systemctl stop samba-ad-dc smbd nmbd winbind systemd-resolved 2>/dev/null
+rm -rf /etc/samba/smb.conf
+rm -rf /var/lib/samba/private/*
+mkdir -p /var/lib/samba/private
+chmod 700 /var/lib/samba/private
+
+# --- 4. PROVISIONAMENTO DO DOMÍNIO ---
+echo "### [4/9] Provisionando o Domínio $REALM ###"
 samba-tool domain provision \
     --server-role=dc \
     --use-rfc2307 \
@@ -32,60 +41,50 @@ samba-tool domain provision \
     --adminpass=$ADMIN_PASSWORD \
     --option="dns forwarder = $FORWARDER"
 
-# --- 3. CONFIGURAÇÃO DE REDE ---
-echo -e "nameserver 127.0.0.1\nsearch $DOMAIN" > /etc/resolv.conf
+# --- 5. AJUSTES NO SMB.CONF ---
+echo "### [5/9] Ajustando smb.conf (Interfaces e Nível 2016) ###"
+# Adiciona as configurações no topo da seção [global]
+sed -i "/\[global\]/a \        ad dc functional level = 2016" /etc/samba/smb.conf
+sed -i "/\[global\]/a \        bind interfaces only = yes" /etc/samba/smb.conf
+sed -i "/\[global\]/a \        interfaces = lo $INTERFACE" /etc/samba/smb.conf
 
-# --- 4. FORÇAR NÍVEL 2016 NOS 3 NÍVEIS (DC, DOMÍNIO, FLORESTA) ---
-echo "--- Aplicando níveis funcionais via LDIF ---"
-# Criando DN amigável para o script
+# --- 6. ELEVAÇÃO DE NÍVEL FUNCIONAL (BANCO LDB) ---
+echo "### [6/9] Elevando Níveis Funcionais da Floresta e Domínio via LDB ###"
 BASE_DN="DC=${DOMAIN//./,DC=}"
-
 cat <<EOF > raise_2016.ldif
-# 1. Objeto do DC (Servidor)
 dn: CN=NTDS Settings,CN=$NETBIOS_NAME,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,$BASE_DN
 changetype: modify
 replace: msDS-Behavior-Version
 msDS-Behavior-Version: 7
 
-# 2. Objeto do Domínio
 dn: $BASE_DN
 changetype: modify
 replace: msDS-Behavior-Version
 msDS-Behavior-Version: 7
 
-# 3. Objeto da Floresta (Partições)
 dn: CN=Partitions,CN=Configuration,$BASE_DN
 changetype: modify
 replace: msDS-Behavior-Version
 msDS-Behavior-Version: 7
 EOF
-
 ldbmodify -H /var/lib/samba/private/sam.ldb raise_2016.ldif
 
-# --- 5. ATIVAÇÃO DA LIXEIRA (RECYCLE BIN) ---
-echo "--- Ativando a Lixeira do AD ---"
+# --- 7. ATIVAÇÃO DA LIXEIRA ---
+echo "### [7/9] Ativando Recycle Bin Feature ###"
 cat <<EOF > enable_recycle.ldif
 dn: CN=Partitions,CN=Configuration,$BASE_DN
 changetype: modify
 add: msDS-EnabledFeature
 msDS-EnabledFeature: CN=Recycle Bin Feature,CN=Optional Features,CN=Directory Service,CN=Windows NT,CN=Services,CN=Configuration,$BASE_DN
 EOF
-
 ldbmodify -H /var/lib/samba/private/sam.ldb enable_recycle.ldif
 
-# --- 6. SINCRONISMO DE HORA ---
-chown root:lp /var/lib/samba/ntp_signd/
-chmod 750 /var/lib/samba/ntp_signd/
+# --- 8. BLINDAGEM DO DNS E SERVIÇOS ---
+echo "### [8/9] Desativando systemd-resolved e configurando DNS local ###"
+systemctl stop systemd-resolved
+systemctl disable systemd-resolved
+systemctl mask systemd-resolved
 
-# --- 7. FINALIZAÇÃO E REINICIALIZAÇÃO ---
-echo "--- Iniciando o serviço Samba AD DC ---"
-systemctl unmask samba-ad-dc
-systemctl enable samba-ad-dc
-systemctl restart samba-ad-dc
-
-# Aguarda 5 segundos para o serviço subir totalmente
-sleep 5
-
-# --- 8. VALIDAÇÃO ---
-echo "--- VALIDAÇÃO FINAL ---"
-samba-tool domain level show
+# Remove o link simbólico do resolv.conf e cria um estático
+rm -f /etc/resolv.conf
+echo "names
