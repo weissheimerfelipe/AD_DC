@@ -2,7 +2,7 @@
 
 # ================================================================= #
 # SCRIPT DE PROVISIONAMENTO SAMBA AD DC - NÍVEL 2016 + LIXEIRA
-# Autor: Seu Nome / GitHub
+#
 # Compatível com: Ubuntu 22.04 / 24.04 (Noble)
 # ================================================================= #
 
