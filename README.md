@@ -1,8 +1,8 @@
-# 🚀 Samba AD DC Auto-Install (Windows Server 2016 Level)
+#  Samba AD DC Auto-Install (Windows Server 2016 Level)
 
 Este repositório contém um script de automação para transformar um servidor **Ubuntu (22.04 ou 24.04)** em um **Controlador de Domínio Active Directory** totalmente funcional, utilizando o Samba 4.
 
-## 🌟 Diferenciais deste Script
+##  Diferenciais deste Script
 
 Diferente de instalações padrão, este script já entrega o ambiente "pronto para produção" com:
 - **Nível Funcional 2016:** Configuração avançada de esquema para compatibilidade com sistemas modernos.
@@ -13,13 +13,13 @@ Diferente de instalações padrão, este script já entrega o ambiente "pronto p
 
 
 
-## 🛠️ Pré-requisitos
+##  Pré-requisitos
 
 - Servidor Ubuntu 24.04 LTS (recomendado).
 - IP Estático configurado na máquina.
 - Acesso root ou sudo.
 
-## 🚀 Como usar
+##  Como usar
 
 1. **Clone o repositório:**
 
